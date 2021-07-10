@@ -22,7 +22,7 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include "math.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -53,8 +53,32 @@ UART_HandleTypeDef huart2;
 /* USER CODE BEGIN PV */
 uint16_t ADCin = 0;
 uint64_t _micro = 0;
-uint16_t dataOut = 0;
+int dataOut = 0;
+int wave =0;
+float ddada =0;
+int Duty = 50;
+char TxDataBuffer[32] = { 0 };
+char RxDataBuffer[32] = { 0 };
+char s[100]={0};
 	uint8_t DACConfig = 0b0011;
+	float f=1;
+	float vh = 3.3;
+	float vl = 0;
+	float dada = 0;
+	int slove=1;
+	uint32_t STATE_Display = 0;
+	enum _StateDisplay
+	{
+	  StateDisplay_Start = 0,
+	  StateDisplay_MenuRoot_Print =10,
+	  StateDisplay_MenuRoot_WaitInput,
+	  StateDisplay_Menu1_Print =20,
+	  StateDisplay_Menu1_WaitInput,
+	  StateDisplay_Menu2_Print =30,
+	  StateDisplay_Menu2_WaitInput,
+	  StateDisplay_Menu3_Print =40,
+	  StateDisplay_Menu3_WaitInput
+	};
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -69,6 +93,7 @@ static void MX_TIM11_Init(void);
 /* USER CODE BEGIN PFP */
 void MCP4922SetOutput(uint8_t Config, uint16_t DACOutput);
 uint64_t micros();
+int16_t UARTRecieveIT();
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -122,19 +147,384 @@ int main(void)
   /* USER CODE BEGIN WHILE */
 	while (1)
 	{
+		HAL_UART_Receive_IT(&huart2,  (uint8_t*)RxDataBuffer, 32);
+		int16_t inputchar = UARTRecieveIT();
 		static uint64_t timestamp = 0;
-		if (micros() - timestamp > 100)
+		if(wave ==1)
 		{
-			timestamp = micros();
-			dataOut++;
-			dataOut %= 4096;
-			if (hspi3.State == HAL_SPI_STATE_READY
-					&& HAL_GPIO_ReadPin(SPI_SS_GPIO_Port, SPI_SS_Pin)
-							== GPIO_PIN_SET)
+			if (micros() - timestamp > 1000)
 			{
-				MCP4922SetOutput(DACConfig, dataOut);
+				timestamp = micros();
+				if(slove==1){
+					dada = (vh-vl)*((4096*timestamp*f)/(3.3*1000000))+(vl*4096/3.3);
+					dataOut = dada;
+					int mod = ((vh - vl) * (4096.0 / 3.3));
+					dataOut %= mod;
+					dataOut += (vl * 4096.0 / 3.3);
+				}
+				if(slove == 0)
+				{
+					dada = (vh-vl)*((4096*timestamp*f)/(3.3*1000000))+((vl)*4096/3.3);
+					dataOut = -dada;
+					int mod = ((vl - vh) * (4096.0 / 3.3));
+					dataOut %= mod;
+					dataOut += ((vh) * 4096.0 / 3.3);
+				}
+				if (hspi3.State == HAL_SPI_STATE_READY
+						&& HAL_GPIO_ReadPin(SPI_SS_GPIO_Port, SPI_SS_Pin)
+								== GPIO_PIN_SET)
+				{
+					MCP4922SetOutput(DACConfig, dataOut);
+				}
 			}
 		}
+		else if(wave ==2)
+		{
+			if (micros() - timestamp > 1000)
+			{
+				timestamp = micros();
+				dada = (((vh-vl)*2048/3.3)*sinf(2*3.14*f*timestamp/1000000))+(2048+(vl*2048/3.3)-((3.3-vh)*2048/3.3));
+				dataOut = dada;
+				if (hspi3.State == HAL_SPI_STATE_READY
+						&& HAL_GPIO_ReadPin(SPI_SS_GPIO_Port, SPI_SS_Pin)
+								== GPIO_PIN_SET)
+				{
+					MCP4922SetOutput(DACConfig, dataOut);
+				}
+			}
+		}
+		else if(wave==3)
+		{
+			if (micros() - timestamp > 1000)
+			{
+				int mytime = 10000*Duty*f;
+
+				if (micros() - timestamp <mytime)
+				{
+					ddada=1;
+					dada = vl*4096/3.3;
+					dataOut = dada;
+					if (hspi3.State == HAL_SPI_STATE_READY && HAL_GPIO_ReadPin(SPI_SS_GPIO_Port, SPI_SS_Pin)
+										== GPIO_PIN_SET)
+					{
+						MCP4922SetOutput(DACConfig, dataOut);
+					}
+				}
+				if (micros() - timestamp >mytime)
+				{
+					ddada =2;
+					dada = vh*4096/3.3;
+					dataOut = dada;
+					if (hspi3.State == HAL_SPI_STATE_READY
+												&& HAL_GPIO_ReadPin(SPI_SS_GPIO_Port, SPI_SS_Pin)
+														== GPIO_PIN_SET)
+					{
+						MCP4922SetOutput(DACConfig, dataOut);
+					}
+				}
+				if(micros() - timestamp >=1000000*f)
+				{
+					timestamp = micros();
+				}
+
+			}
+		}
+        switch(STATE_Display)
+        {
+        	case StateDisplay_Start:
+			  STATE_Display = StateDisplay_MenuRoot_Print;
+			  break;
+		  case StateDisplay_MenuRoot_Print: //display one time state
+		  {
+			  char temp[]="------------\r\n   Menu   \r\n------------\r\n1.sawtooth\r\n2.Sin wave 2\r\n3.square wave \r\n\r\n";
+			  HAL_UART_Transmit(&huart2, (uint16_t*)temp, strlen(temp),1000);
+			  STATE_Display = StateDisplay_MenuRoot_WaitInput;
+			  break;
+		  }
+		  case StateDisplay_MenuRoot_WaitInput: //wait state for input
+			  switch (inputchar)
+			  {
+				  case -1:
+					//no input ; just wait input
+					break;
+				  case '1':
+				  {
+
+					STATE_Display = StateDisplay_Menu1_Print;
+					wave = 1;
+					break;
+				  }
+				  case '2':
+					STATE_Display = StateDisplay_Menu2_Print;
+					wave = 2;
+					break;
+				  case '3':
+					STATE_Display = StateDisplay_Menu3_Print;
+					wave = 3;
+					break;
+				  default: // actully error , you can add error message
+				  {
+					char temp[]="////////////Wrong Input////////////\r\n";
+					HAL_UART_Transmit(&huart2, (uint8_t*)temp, strlen(temp),1000);
+					STATE_Display = StateDisplay_MenuRoot_Print;
+					break;
+				  }
+			  }
+			  break;
+			  case StateDisplay_Menu1_Print: //display one time state
+			  {
+				  char temp[]="------------------------\r\n"
+							  "            Sawtooth   \r\n"
+							  "------------------------\r\n"
+							  "1.increase frequency(+0.1)\r\n"
+							  "2.decrease frequency(-0.1)\r\n"
+							  "3.increase V high(+0.1)\r\n"
+							  "4.decrease V high(-0.1)\r\n"
+							  "5.increase V low(+0.1)\r\n"
+							  "6.decrease V low(-0.1)\r\n"
+							  "7.Slope (Up/Down)\r\n"
+						      "0.Exit to main menu\r\n";
+				  HAL_UART_Transmit(&huart2, (uint8_t*)temp, strlen(temp),1000);
+				  STATE_Display = StateDisplay_Menu1_WaitInput;
+				  break;
+			  }
+			  case StateDisplay_Menu1_WaitInput:
+				  switch (inputchar)
+				  {
+					  case -1:
+						//no input ; just wait input
+						break;
+					  case '1':
+					  {
+						f+=0.1;
+						STATE_Display = StateDisplay_Menu1_Print;
+						break;
+					  }
+					  case '2':
+					  {
+						f-=0.1;
+						if(f<0)
+						{
+							f = 0;
+						}
+						STATE_Display = StateDisplay_Menu1_Print;
+						break;
+					  }
+					  case '3':
+						vh+=0.1;
+						if (vh>=3.3)
+							vh = 3.3;
+						STATE_Display = StateDisplay_Menu1_Print;
+						break;
+					  case '4':
+						vh-=0.1;
+						if (vh<=0.1)
+							vh = 0.1;
+						STATE_Display = StateDisplay_Menu1_Print;
+						break;
+					  case '5':
+						vl+=0.1;
+						if (vl>=vh-0.1)
+							vl = vh-0.1;
+						STATE_Display = StateDisplay_Menu1_Print;
+						break;
+					  case '6':
+						vl-=0.1;
+						if (vl<=0)
+							vl = 0;
+						STATE_Display = StateDisplay_Menu1_Print;
+						break;
+					  case '7':
+					  {
+						if(slove==1)
+						{
+							slove=0;
+
+							break;
+						}
+						else if(slove==0)
+						{
+							slove=1;
+
+							break;
+						}
+					  }
+					  break;
+					  case '0': // back to main manu(10)
+						STATE_Display = StateDisplay_MenuRoot_Print;
+						break;
+					  default: // actully error , you can add error message
+					  {
+						STATE_Display = StateDisplay_Menu1_Print;
+						char temp[]="////////////Wrong Input////////////\r\n";
+						HAL_UART_Transmit(&huart2, (uint8_t*)temp, strlen(temp),1000);
+						break;
+					  }
+				  }
+				  break;
+				  case StateDisplay_Menu2_Print: //display one time state
+				  {
+					  char temp[]="------------------------\r\n"
+								  "            Sin wave   \r\n"
+								  "------------------------\r\n"
+								  "1.increase frequency(+0.1)\r\n"
+								  "2.decrease frequency(-0.1)\r\n"
+								  "3.increase V high(+0.1)\r\n"
+								  "4.decrease V high(-0.1)\r\n"
+								  "5.increase V low(+0.1)\r\n"
+								  "6.decrease V low(-0.1)\r\n"
+							      "0.Exit to main menu\r\n";
+					  HAL_UART_Transmit(&huart2, (uint8_t*)temp, strlen(temp),1000);
+					  STATE_Display = StateDisplay_Menu2_WaitInput;
+					  break;
+				  }
+				  case StateDisplay_Menu2_WaitInput:
+					  switch (inputchar)
+					  {
+						  case -1:
+							//no input ; just wait input
+							break;
+						  case '1':
+						  {
+							f+=0.1;
+							STATE_Display = StateDisplay_Menu2_Print;
+							break;
+						  }
+						  case '2':
+						  {
+							f-=0.1;
+							if(f<0)
+							{
+								f = 0;
+							}
+							STATE_Display = StateDisplay_Menu2_Print;
+							break;
+						  }
+						  case '3':
+							vh+=0.1;
+							if (vh>=3.3)
+								vh = 3.3;
+							STATE_Display = StateDisplay_Menu2_Print;
+							break;
+						  case '4':
+							vh-=0.1;
+							if (vh<=0.1)
+								vh = 0.1;
+							STATE_Display = StateDisplay_Menu2_Print;
+							break;
+						  case '5':
+							vl+=0.1;
+							if (vl>=vh-0.1)
+								vl = vh-0.1;
+							STATE_Display = StateDisplay_Menu2_Print;
+							break;
+						  case '6':
+							vl-=0.1;
+							if (vl<=0)
+								vl = 0;
+							STATE_Display = StateDisplay_Menu2_Print;
+							break;
+						  case '0': // back to main manu(10)
+							STATE_Display = StateDisplay_MenuRoot_Print;
+							break;
+						  default: // actully error , you can add error message
+						  {
+							STATE_Display = StateDisplay_Menu2_Print;
+							char temp[]="////////////Wrong Input////////////\r\n";
+							HAL_UART_Transmit(&huart2, (uint8_t*)temp, strlen(temp),1000);
+							break;
+						  }
+					  }
+					  break;
+					  case StateDisplay_Menu3_Print: //display one time state
+					  {
+						  char temp[]="------------------------\r\n"
+									  "            Square wave   \r\n"
+									  "------------------------\r\n"
+									  "1.increase frequency(+0.1)\r\n"
+									  "2.decrease frequency(-0.1)\r\n"
+									  "3.increase V high(+0.1)\r\n"
+									  "4.decrease V high(-0.1)\r\n"
+									  "5.increase V low(+0.1)\r\n"
+									  "6.decrease V low(-0.1)\r\n"
+								      "7.duty cycle(+5)\r\n"
+								      "8.duty cycle(-5)\r\n"
+									  "0.Exit to main menu\r\n";
+						  HAL_UART_Transmit(&huart2, (uint8_t*)temp, strlen(temp),1000);
+						  STATE_Display = StateDisplay_Menu3_WaitInput;
+						  break;
+					  }
+					  case StateDisplay_Menu3_WaitInput:
+						  switch (inputchar)
+						  {
+							  case -1:
+								//no input ; just wait input
+								break;
+							  case '1':
+							  {
+								f+=0.1;
+								STATE_Display = StateDisplay_Menu3_Print;
+								break;
+							  }
+							  case '2':
+							  {
+								f-=0.1;
+								if(f<0)
+								{
+									f = 0;
+								}
+								STATE_Display = StateDisplay_Menu3_Print;
+								break;
+							  }
+							  case '3':
+								vh+=0.1;
+								if (vh>=3.3)
+									vh = 3.3;
+								STATE_Display = StateDisplay_Menu3_Print;
+								break;
+							  case '4':
+								vh-=0.1;
+								if (vh<=0.1)
+									vh = 0.1;
+								STATE_Display = StateDisplay_Menu3_Print;
+								break;
+							  case '5':
+								vl+=0.1;
+								if (vl>=vh-0.1)
+									vl = vh-0.1;
+								STATE_Display = StateDisplay_Menu3_Print;
+								break;
+							  case '6':
+								vl-=0.1;
+								if (vl<=0)
+									vl = 0;
+								STATE_Display = StateDisplay_Menu3_Print;
+								break;
+							  case '7':
+								Duty+=5;
+								if (Duty>=100)
+									Duty = 100;
+								STATE_Display = StateDisplay_Menu3_Print;
+								break;
+							  case '8':
+								Duty-=5;
+								if (Duty<=0)
+									Duty = 0;
+								STATE_Display = StateDisplay_Menu3_Print;
+								break;
+							  case '0': // back to main manu(10)
+								STATE_Display = StateDisplay_MenuRoot_Print;
+								break;
+							  default: // actully error , you can add error message
+							  {
+								STATE_Display = StateDisplay_Menu3_Print;
+								char temp[]="////////////Wrong Input////////////\r\n";
+								HAL_UART_Transmit(&huart2, (uint8_t*)temp, strlen(temp),1000);
+								break;
+							  }
+						  }
+						  break;
+        }
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -470,7 +860,23 @@ void HAL_SPI_TxCpltCallback(SPI_HandleTypeDef *hspi)
 		HAL_GPIO_WritePin(SPI_SS_GPIO_Port, SPI_SS_Pin, GPIO_PIN_SET);
 	}
 }
+int16_t UARTRecieveIT()
+{
+	static uint32_t dataPos =0;
+	int16_t data=-1;
+	if(huart2.RxXferSize - huart2.RxXferCount!=dataPos)
+	{
+		data=RxDataBuffer[dataPos];
+		dataPos= (dataPos+1)%huart2.RxXferSize;
+	}
+	return data;
+}
 
+void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
+{
+	sprintf(TxDataBuffer, "Received:[%s]\r\n", RxDataBuffer);
+	HAL_UART_Transmit(&huart2, (uint8_t*)TxDataBuffer, strlen(TxDataBuffer), 1000);
+}
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 {
 	if (htim == &htim11)
